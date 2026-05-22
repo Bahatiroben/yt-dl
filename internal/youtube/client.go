@@ -46,9 +46,18 @@ func (c *Client) GetVideo(url string) (*Video, error) {
         return nil, fmt.Errorf("failed to extract metadata: %w", err)
     }
 
-    fmt.Printf("🎥 Title : %s\n", video.Title)
-    fmt.Printf("👤 Author: %s\n", video.Author)
-    fmt.Printf("⏱️  Length: %d seconds\n", video.Length)
+    // Extract formats
+    video.Formats, err = ExtractFormats(playerResponse)
+    if err != nil {
+        return nil, fmt.Errorf("failed to extract formats: %w", err)
+    }
+
+    fmt.Printf("📦 Found %d formats\n", len(video.Formats))
+
+    // Print first few formats for debugging
+    for i, f := range video.Formats[:min(5, len(video.Formats))] {
+        fmt.Printf("   %d. %s %s (itag:%d)\n", i+1, f.QualityLabel, f.MimeType, f.Itag)
+    }
 
     return &video, nil
 }

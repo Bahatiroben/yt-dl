@@ -87,3 +87,69 @@ func ExtractVideoMetadata(playerResponse map[string]interface{}) (Video, error) 
 
 	return video, nil
 }
+
+// ExtractFormats extracts available formats from streamingData
+func ExtractFormats(playerResponse map[string]interface{}) ([]Format, error) {
+    var formats []Format
+
+    streamingData, ok := playerResponse["streamingData"].(map[string]interface{})
+    if !ok {
+        return nil, errors.New("streamingData not found in player response")
+    }
+
+    // Helper function to process format array
+    processFormats := func(formatList interface{}) {
+        if formatsArray, ok := formatList.([]interface{}); ok {
+            for _, f := range formatsArray {
+                if formatMap, ok := f.(map[string]interface{}); ok {
+                    format := Format{
+                        HasVideo: true,
+                        HasAudio: true,
+                    }
+
+                    if itag, ok := formatMap["itag"].(float64); ok {
+                        format.Itag = int(itag)
+                    }
+                    if qualityLabel, ok := formatMap["qualityLabel"].(string); ok {
+                        format.QualityLabel = qualityLabel
+                    }
+                    if mimeType, ok := formatMap["mimeType"].(string); ok {
+                        format.MimeType = mimeType
+                    }
+                    if bitrate, ok := formatMap["bitrate"].(float64); ok {
+                        format.Bitrate = int(bitrate)
+                    }
+                    if url, ok := formatMap["url"].(string); ok {
+                        format.URL = url
+                    }
+
+                    // Check if it's audio only or video only
+                    if mimeType, ok := formatMap["mimeType"].(string); ok {
+                        if strings.Contains(mimeType, "audio/") {
+                            format.HasVideo = false
+                            format.HasAudio = true
+                        } else if strings.Contains(mimeType, "video/") {
+                            format.HasAudio = false // adaptive video usually has no audio
+                        }
+                    }
+
+                    formats = append(formats, format)
+                }
+            }
+        }
+    }
+
+    // Process both regular formats and adaptive formats
+    if regularFormats, exists := streamingData["formats"]; exists {
+        processFormats(regularFormats)
+    }
+    if adaptiveFormats, exists := streamingData["adaptiveFormats"]; exists {
+        processFormats(adaptiveFormats)
+    }
+
+    if len(formats) == 0 {
+        return nil, errors.New("no formats found")
+    }
+
+    return formats, nil
+}
