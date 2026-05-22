@@ -41,39 +41,48 @@ func ExtractVideoID(url string) (string, error) {
 
 // ExtractPlayerResponse extracts the ytInitialPlayerResponse JSON from page HTML
 func ExtractPlayerResponse(html string) (map[string]interface{}, error) {
-	// Multiple improved patterns to catch different ways YouTube embeds the data
-	patterns := []*regexp.Regexp{
-		// Most common pattern
-		regexp.MustCompile(`var ytInitialPlayerResponse\s*=\s*(\{.+?\});`),
-		// With DOTALL (multiline) support and better ending boundary
-		regexp.MustCompile(`(?s)ytInitialPlayerResponse\s*=\s*(\{.+?\})\s*;\s*(?:var|<\/script)`),
-		// Alternative pattern
-		regexp.MustCompile(`ytInitialPlayerResponse\s*=\s*(\{[\s\S]*?\})\s*;\s*var`),
-	}
+    // Try multiple patterns
+    patterns := []*regexp.Regexp{
+        regexp.MustCompile(`ytInitialPlayerResponse\s*=\s*(\{.+?\});`),
+        regexp.MustCompile(`(?s)"playerResponse"\s*:\s*(\{.+?\})\s*,\s*"`),
+        regexp.MustCompile(`(?s)ytInitialPlayerResponse\s*=\s*(\{[\s\S]*?})\s*;\s*`),
+        regexp.MustCompile(`(?s)var\s+ytInitialPlayerResponse\s*=\s*(\{[\s\S]*?})\s*;`),
+    }
 
-	for _, re := range patterns {
-		matches := re.FindStringSubmatch(html)
-		if len(matches) > 1 {
-			jsonStr := matches[1]
+    for i, re := range patterns {
+        matches := re.FindStringSubmatch(html)
+        if len(matches) > 1 {
+            jsonStr := matches[1]
+            fmt.Printf("✅ Pattern %d matched! Parsing JSON...\n", i+1)
 
-			// Clean up possible trailing commas or malformed JSON
-			jsonStr = strings.TrimSpace(jsonStr)
+            var playerResponse map[string]interface{}
+            err := json.Unmarshal([]byte(jsonStr), &playerResponse)
+            if err == nil {
+                return playerResponse, nil
+            }
+            fmt.Printf("   JSON parse failed: %v\n", err)
+        }
+    }
 
-			var playerResponse map[string]interface{}
-			err := json.Unmarshal([]byte(jsonStr), &playerResponse)
-			if err == nil {
-				return playerResponse, nil
-			}
-		}
-	}
+    // === DEBUG HELP ===
+    fmt.Println("\n🔍 Debugging: Searching for 'ytInitialPlayerResponse' in page...")
 
-	// Debug: Save HTML snippet if extraction fails
-	if len(html) > 1000 {
-		os.WriteFile("debug_page.html", []byte(html[:2000]), 0644)
-		fmt.Println("💾 Saved first 2000 bytes to debug_page.html for inspection")
-	}
+    if idx := strings.Index(html, "ytInitialPlayerResponse"); idx != -1 {
+        start := max(0, idx-100)
+        end := min(len(html), idx+300)
+        fmt.Println("Found mention at position", idx)
+        fmt.Println("Snippet:", html[start:end])
+    } else {
+        fmt.Println("❌ 'ytInitialPlayerResponse' string NOT found in the page at all.")
+    }
 
-	return nil, errors.New("could not find ytInitialPlayerResponse in page (YouTube layout may have changed)")
+    // Save more of the page for debugging
+    if len(html) > 5000 {
+        os.WriteFile("debug_page.html", []byte(html[:5000]), 0644)
+        fmt.Println("💾 Saved first 5000 bytes to debug_page.html")
+    }
+
+    return nil, errors.New("could not find ytInitialPlayerResponse - YouTube changed their structure")
 }
 
 // ExtractVideoMetadata extracts title, author, length from player response

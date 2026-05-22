@@ -12,7 +12,7 @@ func main() {
     fmt.Println("🚀 My YouTube Downloader")
 
     // You can change this URL
-    videoURL := "https://www.youtube.com/watch?v=5XAUYY8kdcg&list=RD5XAUYY8kdcg&start_radio=1"
+    videoURL := "https://www.youtube.com/watch?v=borrrGqCbd0&list=RD5XAUYY8kdcg&index=3"
 
     client := youtube.NewClient()
 
