@@ -30,13 +30,19 @@ func (c *Client) GetVideo(url string) (*Video, error) {
 
 	fmt.Printf("📼 Video ID: %s\n", videoID)
 
-	// Use Innertube API
+	// Try Innertube API first
 	playerResponse, err := c.fetchInnertubePlayerResponse(videoID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch player response: %w", err)
+		fmt.Printf("⚠️  Innertube API failed: %v\n", err)
+		fmt.Println("🔄 Trying HTML page extraction...")
+		// Fallback to HTML extraction
+		playerResponse, err = c.fetchPlayerResponseFromHTML(videoID)
+		if err != nil {
+			return nil, fmt.Errorf("both API and HTML extraction failed: %w", err)
+		}
 	}
 
-	fmt.Println("✅ Successfully fetched data via Innertube API")
+	fmt.Println("✅ Successfully fetched data")
 
 	video, err := ExtractVideoMetadata(playerResponse)
 	if err != nil {
@@ -92,56 +98,107 @@ func (c *Client) Download(video *Video, outputPath string) error {
 	return nil
 }
 
-// Innertube API call - using ANDROID client (more reliable)
+// Innertube API call - using WEB client
 func (c *Client) fetchInnertubePlayerResponse(videoID string) (map[string]interface{}, error) {
-    apiURL := "https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
+	apiURL := "https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
 
-    payload := map[string]interface{}{
-        "videoId": videoID,
-        "context": map[string]interface{}{
-            "client": map[string]interface{}{
-                "clientName":    "ANDROID",
-                "clientVersion": "19.45.36",
-                "androidSdkVersion": 30,
-            },
-        },
-        "contentCheckOk": true,
-        "racyCheckOk":    true,
-    }
+	payload := map[string]interface{}{
+		"videoId": videoID,
+		"context": map[string]interface{}{
+			"client": map[string]interface{}{
+				"clientName":    "WEB",
+				"clientVersion": "2.20240522.00.00",
+				"hl":            "en",
+				"gl":            "US",
+			},
+		},
+	}
 
-    jsonPayload, _ := json.Marshal(payload)
+	jsonPayload, _ := json.Marshal(payload)
 
-    req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonPayload))
-    if err != nil {
-        return nil, err
-    }
+	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		return nil, err
+	}
 
-    req.Header.Set("User-Agent", "com.google.android.youtube/19.45.36 (Linux; U; Android 14) gzip")
-    req.Header.Set("Accept", "application/json")
-    req.Header.Set("Content-Type", "application/json")
-    req.Header.Set("Origin", "https://www.youtube.com")
-    req.Header.Set("Referer", "https://www.youtube.com/watch?v="+videoID)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://www.youtube.com")
+	req.Header.Set("Referer", "https://www.youtube.com/watch?v="+videoID)
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 
-    resp, err := c.httpClient.Do(req)
-    if err != nil {
-        return nil, err
-    }
-    defer resp.Body.Close()
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
 
-    if resp.StatusCode != http.StatusOK {
-        return nil, fmt.Errorf("innertube API returned status: %d", resp.StatusCode)
-    }
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
 
-    body, err := io.ReadAll(resp.Body)
-    if err != nil {
-        return nil, err
-    }
+	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("❌ API Error (Status %d):\n%s\n", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("innertube API returned status: %d - %s", resp.StatusCode, string(body))
+	}
 
-    var result map[string]interface{}
-    err = json.Unmarshal(body, &result)
-    if err != nil {
-        return nil, err
-    }
+	var result map[string]interface{}
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		return nil, err
+	}
 
-    return result, nil
+	// Debug: Save full response to file
+	prettyJSON, _ := json.MarshalIndent(result, "", "  ")
+	os.WriteFile("innertube_response.json", prettyJSON, 0644)
+
+	// Check playability status before accepting response
+	if playability, ok := result["playabilityStatus"].(map[string]interface{}); ok {
+		if status, ok := playability["status"].(string); ok && status != "OK" {
+			if reason, ok := playability["reason"].(string); ok {
+				fmt.Printf("❌ Playability check: %s - %s\n", status, reason)
+			}
+			return nil, fmt.Errorf("API returned non-OK status: %s", status)
+		}
+	}
+
+	fmt.Println("💾 Full Innertube response saved to innertube_response.json")
+
+	return result, nil
+}
+
+// fetchPlayerResponseFromHTML fetches the YouTube page and extracts ytInitialPlayerResponse
+func (c *Client) fetchPlayerResponseFromHTML(videoID string) (map[string]interface{}, error) {
+	url := fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	htmlContent := string(body)
+	fmt.Println("📄 Fetched YouTube page, attempting to extract playerResponse...")
+
+	playerResponse, err := ExtractPlayerResponse(htmlContent)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract from HTML: %w", err)
+	}
+
+	return playerResponse, nil
 }
