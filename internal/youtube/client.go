@@ -92,53 +92,56 @@ func (c *Client) Download(video *Video, outputPath string) error {
 	return nil
 }
 
-// Innertube API call
+// Innertube API call - using ANDROID client (more reliable)
 func (c *Client) fetchInnertubePlayerResponse(videoID string) (map[string]interface{}, error) {
-	apiURL := "https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
+    apiURL := "https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
 
-	payload := map[string]interface{}{
-		"videoId": videoID,
-		"context": map[string]interface{}{
-			"client": map[string]interface{}{
-				"clientName":    "WEB",
-				"clientVersion": "2.20250520.01.00",
-			},
-		},
-	}
+    payload := map[string]interface{}{
+        "videoId": videoID,
+        "context": map[string]interface{}{
+            "client": map[string]interface{}{
+                "clientName":    "ANDROID",
+                "clientVersion": "19.45.36",
+                "androidSdkVersion": 30,
+            },
+        },
+        "contentCheckOk": true,
+        "racyCheckOk":    true,
+    }
 
-	jsonPayload, _ := json.Marshal(payload)
+    jsonPayload, _ := json.Marshal(payload)
 
-	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonPayload))
-	if err != nil {
-		return nil, err
-	}
+    req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonPayload))
+    if err != nil {
+        return nil, err
+    }
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Origin", "https://www.youtube.com")
-	req.Header.Set("Referer", "https://www.youtube.com/watch?v="+videoID)
+    req.Header.Set("User-Agent", "com.google.android.youtube/19.45.36 (Linux; U; Android 14) gzip")
+    req.Header.Set("Accept", "application/json")
+    req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("Origin", "https://www.youtube.com")
+    req.Header.Set("Referer", "https://www.youtube.com/watch?v="+videoID)
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+    resp, err := c.httpClient.Do(req)
+    if err != nil {
+        return nil, err
+    }
+    defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("innertube API returned status: %d", resp.StatusCode)
-	}
+    if resp.StatusCode != http.StatusOK {
+        return nil, fmt.Errorf("innertube API returned status: %d", resp.StatusCode)
+    }
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
+    body, err := io.ReadAll(resp.Body)
+    if err != nil {
+        return nil, err
+    }
 
-	var result map[string]interface{}
-	err = json.Unmarshal(body, &result)
-	if err != nil {
-		return nil, err
-	}
+    var result map[string]interface{}
+    err = json.Unmarshal(body, &result)
+    if err != nil {
+        return nil, err
+    }
 
-	return result, nil
+    return result, nil
 }
