@@ -87,13 +87,18 @@ func ExtractPlayerResponse(html string) (map[string]interface{}, error) {
 
 func max(a, b int) int { if a > b { return a }; return b }
 func min(a, b int) int { if a < b { return a }; return b }
-// ExtractVideoMetadata for Innertube API
+
+// ExtractVideoMetadata - improved for current Innertube API
 func ExtractVideoMetadata(playerResponse map[string]interface{}) (Video, error) {
     video := Video{}
 
-    // Try root level videoDetails
+    fmt.Println("🔍 Extracting metadata...")
+
+    // Primary location: videoDetails
     if videoDetails, ok := playerResponse["videoDetails"].(map[string]interface{}); ok {
-        if title, ok := videoDetails["title"].(string); ok {
+        fmt.Println("✅ Found videoDetails")
+
+        if title, ok := videoDetails["title"].(string); ok && title != "" {
             video.Title = title
         }
         if author, ok := videoDetails["author"].(string); ok {
@@ -107,10 +112,23 @@ func ExtractVideoMetadata(playerResponse map[string]interface{}) (Video, error) 
         }
     }
 
+    // Fallback: check root level
     if video.Title == "" {
+        if title, ok := playerResponse["title"].(string); ok {
+            video.Title = title
+        }
+    }
+
+    if video.Title == "" {
+        // Print available keys for debugging
+        fmt.Println("🔍 Available keys in playerResponse:")
+        for k := range playerResponse {
+            fmt.Printf("   • %s\n", k)
+        }
         return video, errors.New("could not extract video title")
     }
 
+    fmt.Printf("✅ Extracted Title: %s\n", video.Title)
     return video, nil
 }
 
