@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 )
@@ -39,26 +40,40 @@ func ExtractVideoID(url string) (string, error) {
 }
 
 // ExtractPlayerResponse extracts the ytInitialPlayerResponse JSON from page HTML
-func ExtractPlayerResponse(html string) (map[string]any, error) {
-	// Regex to find ytInitialPlayerResponse
-	// TODO: Keep an eye on YouTube's page structure changes, as this regex might need updates in the future
-	re := regexp.MustCompile(`var ytInitialPlayerResponse\s*=\s*(\{.+?\});`)
-	matches := re.FindStringSubmatch(html)
-
-	if len(matches) < 2 {
-		return nil, errors.New("could not find ytInitialPlayerResponse in page")
+func ExtractPlayerResponse(html string) (map[string]interface{}, error) {
+	// Multiple improved patterns to catch different ways YouTube embeds the data
+	patterns := []*regexp.Regexp{
+		// Most common pattern
+		regexp.MustCompile(`var ytInitialPlayerResponse\s*=\s*(\{.+?\});`),
+		// With DOTALL (multiline) support and better ending boundary
+		regexp.MustCompile(`(?s)ytInitialPlayerResponse\s*=\s*(\{.+?\})\s*;\s*(?:var|<\/script)`),
+		// Alternative pattern
+		regexp.MustCompile(`ytInitialPlayerResponse\s*=\s*(\{[\s\S]*?\})\s*;\s*var`),
 	}
 
-	jsonStr := matches[1]
+	for _, re := range patterns {
+		matches := re.FindStringSubmatch(html)
+		if len(matches) > 1 {
+			jsonStr := matches[1]
 
-	// Parse JSON
-	var playerResponse map[string]any
-	err := json.Unmarshal([]byte(jsonStr), &playerResponse)
-	if err != nil {
-		return nil, errors.New("failed to parse ytInitialPlayerResponse JSON")
+			// Clean up possible trailing commas or malformed JSON
+			jsonStr = strings.TrimSpace(jsonStr)
+
+			var playerResponse map[string]interface{}
+			err := json.Unmarshal([]byte(jsonStr), &playerResponse)
+			if err == nil {
+				return playerResponse, nil
+			}
+		}
 	}
 
-	return playerResponse, nil
+	// Debug: Save HTML snippet if extraction fails
+	if len(html) > 1000 {
+		os.WriteFile("debug_page.html", []byte(html[:2000]), 0644)
+		fmt.Println("💾 Saved first 2000 bytes to debug_page.html for inspection")
+	}
+
+	return nil, errors.New("could not find ytInitialPlayerResponse in page (YouTube layout may have changed)")
 }
 
 // ExtractVideoMetadata extracts title, author, length from player response
@@ -90,120 +105,120 @@ func ExtractVideoMetadata(playerResponse map[string]interface{}) (Video, error) 
 
 // ExtractFormats extracts available formats from streamingData
 func ExtractFormats(playerResponse map[string]interface{}) ([]Format, error) {
-    var formats []Format
+	var formats []Format
 
-    streamingData, ok := playerResponse["streamingData"].(map[string]interface{})
-    if !ok {
-        return nil, errors.New("streamingData not found in player response")
-    }
+	streamingData, ok := playerResponse["streamingData"].(map[string]interface{})
+	if !ok {
+		return nil, errors.New("streamingData not found in player response")
+	}
 
-    // Helper function to process format array
-    processFormats := func(formatList interface{}) {
-        if formatsArray, ok := formatList.([]interface{}); ok {
-            for _, f := range formatsArray {
-                if formatMap, ok := f.(map[string]interface{}); ok {
-                    format := Format{
-                        HasVideo: true,
-                        HasAudio: true,
-                    }
+	// Helper function to process format array
+	processFormats := func(formatList interface{}) {
+		if formatsArray, ok := formatList.([]interface{}); ok {
+			for _, f := range formatsArray {
+				if formatMap, ok := f.(map[string]interface{}); ok {
+					format := Format{
+						HasVideo: true,
+						HasAudio: true,
+					}
 
-                    if itag, ok := formatMap["itag"].(float64); ok {
-                        format.Itag = int(itag)
-                    }
-                    if qualityLabel, ok := formatMap["qualityLabel"].(string); ok {
-                        format.QualityLabel = qualityLabel
-                    }
-                    if mimeType, ok := formatMap["mimeType"].(string); ok {
-                        format.MimeType = mimeType
-                    }
-                    if bitrate, ok := formatMap["bitrate"].(float64); ok {
-                        format.Bitrate = int(bitrate)
-                    }
-                    if url, ok := formatMap["url"].(string); ok {
-                        format.URL = url
-                    }
+					if itag, ok := formatMap["itag"].(float64); ok {
+						format.Itag = int(itag)
+					}
+					if qualityLabel, ok := formatMap["qualityLabel"].(string); ok {
+						format.QualityLabel = qualityLabel
+					}
+					if mimeType, ok := formatMap["mimeType"].(string); ok {
+						format.MimeType = mimeType
+					}
+					if bitrate, ok := formatMap["bitrate"].(float64); ok {
+						format.Bitrate = int(bitrate)
+					}
+					if url, ok := formatMap["url"].(string); ok {
+						format.URL = url
+					}
 
-                    // Check if it's audio only or video only
-                    if mimeType, ok := formatMap["mimeType"].(string); ok {
-                        if strings.Contains(mimeType, "audio/") {
-                            format.HasVideo = false
-                            format.HasAudio = true
-                        } else if strings.Contains(mimeType, "video/") {
-                            format.HasAudio = false // adaptive video usually has no audio
-                        }
-                    }
+					// Check if it's audio only or video only
+					if mimeType, ok := formatMap["mimeType"].(string); ok {
+						if strings.Contains(mimeType, "audio/") {
+							format.HasVideo = false
+							format.HasAudio = true
+						} else if strings.Contains(mimeType, "video/") {
+							format.HasAudio = false // adaptive video usually has no audio
+						}
+					}
 
-                    formats = append(formats, format)
-                }
-            }
-        }
-    }
+					formats = append(formats, format)
+				}
+			}
+		}
+	}
 
-    // Process both regular formats and adaptive formats
-    if regularFormats, exists := streamingData["formats"]; exists {
-        processFormats(regularFormats)
-    }
-    if adaptiveFormats, exists := streamingData["adaptiveFormats"]; exists {
-        processFormats(adaptiveFormats)
-    }
+	// Process both regular formats and adaptive formats
+	if regularFormats, exists := streamingData["formats"]; exists {
+		processFormats(regularFormats)
+	}
+	if adaptiveFormats, exists := streamingData["adaptiveFormats"]; exists {
+		processFormats(adaptiveFormats)
+	}
 
-    if len(formats) == 0 {
-        return nil, errors.New("no formats found")
-    }
+	if len(formats) == 0 {
+		return nil, errors.New("no formats found")
+	}
 
-    return formats, nil
+	return formats, nil
 }
 
 // SelectBestFormat selects the best format preferring direct downloadable URLs
 func SelectBestFormat(formats []Format) (*Format, error) {
-    var best *Format
+	var best *Format
 
-    for i := range formats {
-        f := &formats[i]
+	for i := range formats {
+		f := &formats[i]
 
-        // Skip formats without URL for now (they need deciphering)
-        if f.URL == "" {
-            continue
-        }
+		// Skip formats without URL for now (they need deciphering)
+		if f.URL == "" {
+			continue
+		}
 
-        // Priority 1: MP4 with both video + audio
-        if strings.Contains(f.MimeType, "mp4") && f.HasVideo && f.HasAudio {
-            if best == nil || f.Bitrate > best.Bitrate {
-                best = f
-            }
-        }
-    }
+		// Priority 1: MP4 with both video + audio
+		if strings.Contains(f.MimeType, "mp4") && f.HasVideo && f.HasAudio {
+			if best == nil || f.Bitrate > best.Bitrate {
+				best = f
+			}
+		}
+	}
 
-    // Priority 2: Any MP4 with direct URL
-    if best == nil {
-        for i := range formats {
-            f := &formats[i]
-            if f.URL == "" {
-                continue
-            }
-            if strings.Contains(f.MimeType, "mp4") {
-                if best == nil || f.Bitrate > best.Bitrate {
-                    best = f
-                }
-            }
-        }
-    }
+	// Priority 2: Any MP4 with direct URL
+	if best == nil {
+		for i := range formats {
+			f := &formats[i]
+			if f.URL == "" {
+				continue
+			}
+			if strings.Contains(f.MimeType, "mp4") {
+				if best == nil || f.Bitrate > best.Bitrate {
+					best = f
+				}
+			}
+		}
+	}
 
-    // Priority 3: Any format with direct URL (last resort)
-    if best == nil {
-        for i := range formats {
-            f := &formats[i]
-            if f.URL != "" {
-                if best == nil || f.Bitrate > best.Bitrate {
-                    best = f
-                }
-            }
-        }
-    }
+	// Priority 3: Any format with direct URL (last resort)
+	if best == nil {
+		for i := range formats {
+			f := &formats[i]
+			if f.URL != "" {
+				if best == nil || f.Bitrate > best.Bitrate {
+					best = f
+				}
+			}
+		}
+	}
 
-    if best == nil {
-        return nil, errors.New("no downloadable format found (all require deciphering)")
-    }
+	if best == nil {
+		return nil, errors.New("no downloadable format found (all require deciphering)")
+	}
 
-    return best, nil
+	return best, nil
 }
