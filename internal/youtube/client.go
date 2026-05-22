@@ -1,12 +1,12 @@
 package youtube
 
 import (
-	"compress/gzip"
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	_ "strings"
 	"time"
 )
 
@@ -30,17 +30,13 @@ func (c *Client) GetVideo(url string) (*Video, error) {
 
 	fmt.Printf("📼 Video ID: %s\n", videoID)
 
-	pageHTML, err := c.fetchWatchPage(videoID)
+	// Use Innertube API
+	playerResponse, err := c.fetchInnertubePlayerResponse(videoID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch video page: %w", err)
+		return nil, fmt.Errorf("failed to fetch player response: %w", err)
 	}
 
-	fmt.Printf("📄 Fetched watch page (%d bytes)\n", len(pageHTML))
-
-	playerResponse, err := ExtractPlayerResponse(pageHTML)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract player response: %w", err)
-	}
+	fmt.Println("✅ Successfully fetched data via Innertube API")
 
 	video, err := ExtractVideoMetadata(playerResponse)
 	if err != nil {
@@ -96,45 +92,53 @@ func (c *Client) Download(video *Video, outputPath string) error {
 	return nil
 }
 
-// fetchWatchPage with gzip support
-func (c *Client) fetchWatchPage(videoID string) (string, error) {
-	url := "https://www.youtube.com/watch?v=" + videoID
+// Innertube API call
+func (c *Client) fetchInnertubePlayerResponse(videoID string) (map[string]interface{}, error) {
+	apiURL := "https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
 
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return "", err
+	payload := map[string]interface{}{
+		"videoId": videoID,
+		"context": map[string]interface{}{
+			"client": map[string]interface{}{
+				"clientName":    "WEB",
+				"clientVersion": "2.20250520.01.00",
+			},
+		},
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
-	req.Header.Set("Referer", "https://www.youtube.com/")
+	jsonPayload, _ := json.Marshal(payload)
+
+	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://www.youtube.com")
+	req.Header.Set("Referer", "https://www.youtube.com/watch?v="+videoID)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("status code: %d", resp.StatusCode)
+		return nil, fmt.Errorf("innertube API returned status: %d", resp.StatusCode)
 	}
 
-	var reader io.Reader = resp.Body
-	if resp.Header.Get("Content-Encoding") == "gzip" {
-		gzipReader, err := gzip.NewReader(resp.Body)
-		if err != nil {
-			return "", err
-		}
-		defer gzipReader.Close()
-		reader = gzipReader
-	}
-
-	body, err := io.ReadAll(reader)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	return string(body), nil
+	var result map[string]interface{}
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }

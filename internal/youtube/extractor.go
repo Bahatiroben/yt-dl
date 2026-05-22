@@ -87,97 +87,114 @@ func ExtractPlayerResponse(html string) (map[string]interface{}, error) {
 
 func max(a, b int) int { if a > b { return a }; return b }
 func min(a, b int) int { if a < b { return a }; return b }
-// ExtractVideoMetadata extracts title, author, length from player response
+// ExtractVideoMetadata for Innertube API
 func ExtractVideoMetadata(playerResponse map[string]interface{}) (Video, error) {
-	video := Video{}
+    video := Video{}
 
-	// Extract title
-	if videoDetails, ok := playerResponse["videoDetails"].(map[string]interface{}); ok {
-		if title, ok := videoDetails["title"].(string); ok {
-			video.Title = title
-		}
-		if author, ok := videoDetails["author"].(string); ok {
-			video.Author = author
-		}
-		if lengthStr, ok := videoDetails["lengthSeconds"].(string); ok {
-			fmt.Sscanf(lengthStr, "%d", &video.Length)
-		}
-		if id, ok := videoDetails["videoId"].(string); ok {
-			video.ID = id
-		}
-	}
+    // Try root level videoDetails
+    if videoDetails, ok := playerResponse["videoDetails"].(map[string]interface{}); ok {
+        if title, ok := videoDetails["title"].(string); ok {
+            video.Title = title
+        }
+        if author, ok := videoDetails["author"].(string); ok {
+            video.Author = author
+        }
+        if lengthStr, ok := videoDetails["lengthSeconds"].(string); ok {
+            fmt.Sscanf(lengthStr, "%d", &video.Length)
+        }
+        if id, ok := videoDetails["videoId"].(string); ok {
+            video.ID = id
+        }
+    }
 
-	if video.Title == "" {
-		return video, errors.New("could not extract video title")
-	}
+    if video.Title == "" {
+        return video, errors.New("could not extract video title")
+    }
 
-	return video, nil
+    return video, nil
 }
 
-// ExtractFormats extracts available formats from streamingData
+// ExtractFormats - improved with better debugging
 func ExtractFormats(playerResponse map[string]interface{}) ([]Format, error) {
-	var formats []Format
+    var formats []Format
 
-	streamingData, ok := playerResponse["streamingData"].(map[string]interface{})
-	if !ok {
-		return nil, errors.New("streamingData not found in player response")
-	}
+    // Check playability status first
+    if playability, ok := playerResponse["playabilityStatus"].(map[string]interface{}); ok {
+        if status, ok := playability["status"].(string); ok {
+            fmt.Printf("🎮 Playability Status: %s\n", status)
+            if status != "OK" {
+                if reason, ok := playability["reason"].(string); ok {
+                    fmt.Printf("❌ Reason: %s\n", reason)
+                }
+                return nil, fmt.Errorf("video not playable: %s", status)
+            }
+        }
+    }
 
-	// Helper function to process format array
-	processFormats := func(formatList interface{}) {
-		if formatsArray, ok := formatList.([]interface{}); ok {
-			for _, f := range formatsArray {
-				if formatMap, ok := f.(map[string]interface{}); ok {
-					format := Format{
-						HasVideo: true,
-						HasAudio: true,
-					}
+    // Try to find streamingData
+    streamingData, ok := playerResponse["streamingData"].(map[string]interface{})
+    if !ok {
+        fmt.Println("🔍 streamingData not found at root. Available keys:")
+        for k := range playerResponse {
+            fmt.Printf("   • %s\n", k)
+        }
+        return nil, errors.New("streamingData not found")
+    }
 
-					if itag, ok := formatMap["itag"].(float64); ok {
-						format.Itag = int(itag)
-					}
-					if qualityLabel, ok := formatMap["qualityLabel"].(string); ok {
-						format.QualityLabel = qualityLabel
-					}
-					if mimeType, ok := formatMap["mimeType"].(string); ok {
-						format.MimeType = mimeType
-					}
-					if bitrate, ok := formatMap["bitrate"].(float64); ok {
-						format.Bitrate = int(bitrate)
-					}
-					if url, ok := formatMap["url"].(string); ok {
-						format.URL = url
-					}
+    fmt.Println("✅ Found streamingData")
 
-					// Check if it's audio only or video only
-					if mimeType, ok := formatMap["mimeType"].(string); ok {
-						if strings.Contains(mimeType, "audio/") {
-							format.HasVideo = false
-							format.HasAudio = true
-						} else if strings.Contains(mimeType, "video/") {
-							format.HasAudio = false // adaptive video usually has no audio
-						}
-					}
+    // Process formats
+    processFormats := func(formatList interface{}) {
+        if formatsArray, ok := formatList.([]interface{}); ok {
+            for _, f := range formatsArray {
+                if formatMap, ok := f.(map[string]interface{}); ok {
+                    format := Format{
+                        HasVideo: true,
+                        HasAudio: true,
+                    }
 
-					formats = append(formats, format)
-				}
-			}
-		}
-	}
+                    if itag, ok := formatMap["itag"].(float64); ok {
+                        format.Itag = int(itag)
+                    }
+                    if qualityLabel, ok := formatMap["qualityLabel"].(string); ok {
+                        format.QualityLabel = qualityLabel
+                    }
+                    if mimeType, ok := formatMap["mimeType"].(string); ok {
+                        format.MimeType = mimeType
+                    }
+                    if bitrate, ok := formatMap["bitrate"].(float64); ok {
+                        format.Bitrate = int(bitrate)
+                    }
+                    if url, ok := formatMap["url"].(string); ok {
+                        format.URL = url
+                    }
 
-	// Process both regular formats and adaptive formats
-	if regularFormats, exists := streamingData["formats"]; exists {
-		processFormats(regularFormats)
-	}
-	if adaptiveFormats, exists := streamingData["adaptiveFormats"]; exists {
-		processFormats(adaptiveFormats)
-	}
+                    if mimeType, ok := formatMap["mimeType"].(string); ok {
+                        if strings.Contains(mimeType, "audio/") {
+                            format.HasVideo = false
+                        } else if strings.Contains(mimeType, "video/") && !strings.Contains(mimeType, "audio") {
+                            format.HasAudio = false
+                        }
+                    }
 
-	if len(formats) == 0 {
-		return nil, errors.New("no formats found")
-	}
+                    formats = append(formats, format)
+                }
+            }
+        }
+    }
 
-	return formats, nil
+    if regular, exists := streamingData["formats"]; exists {
+        processFormats(regular)
+    }
+    if adaptive, exists := streamingData["adaptiveFormats"]; exists {
+        processFormats(adaptive)
+    }
+
+    if len(formats) == 0 {
+        return nil, errors.New("no formats found in streamingData")
+    }
+
+    return formats, nil
 }
 
 // SelectBestFormat selects the best format preferring direct downloadable URLs
