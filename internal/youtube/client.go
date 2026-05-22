@@ -1,6 +1,7 @@
 package youtube
 
 import (
+    "fmt"
     "net/http"
 )
 
@@ -15,8 +16,15 @@ func NewClient() *Client {
 }
 
 func (c *Client) GetVideo(url string) (*Video, error) {
-    // TODO: Implement actual logic to fetch video details from YouTube
+    videoID, err := ExtractVideoID(url)
+    if err != nil {
+        return nil, fmt.Errorf("invalid YouTube URL: %w", err)
+    }
+
+    fmt.Printf("📼 Extracted Video ID: %s\n", videoID)
+
     return &Video{
+        ID:     videoID,
         Title:  "Placeholder Title",
         Author: "Placeholder Author",
         Length: 180,
