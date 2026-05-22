@@ -4,6 +4,8 @@ import (
     "fmt"
     "io"
     "net/http"
+    "os"
+    _ "github.com/Bahatiroben/yt-dl/internal/utils"
 )
 
 type Client struct {
@@ -17,6 +19,8 @@ func NewClient() *Client {
 }
 
 func (c *Client) GetVideo(url string) (*Video, error) {
+    // ... (keep all previous code until format extraction)
+
     videoID, err := ExtractVideoID(url)
     if err != nil {
         return nil, fmt.Errorf("invalid YouTube URL: %w", err)
@@ -24,7 +28,6 @@ func (c *Client) GetVideo(url string) (*Video, error) {
 
     fmt.Printf("📼 Video ID: %s\n", videoID)
 
-    // Fetch watch page
     pageHTML, err := c.fetchWatchPage(videoID)
     if err != nil {
         return nil, fmt.Errorf("failed to fetch video page: %w", err)
@@ -32,21 +35,16 @@ func (c *Client) GetVideo(url string) (*Video, error) {
 
     fmt.Printf("📄 Fetched watch page (%d bytes)\n", len(pageHTML))
 
-    // Extract player response JSON
     playerResponse, err := ExtractPlayerResponse(pageHTML)
     if err != nil {
         return nil, fmt.Errorf("failed to extract player response: %w", err)
     }
 
-    fmt.Println("✅ Extracted ytInitialPlayerResponse")
-
-    // Extract metadata
     video, err := ExtractVideoMetadata(playerResponse)
     if err != nil {
         return nil, fmt.Errorf("failed to extract metadata: %w", err)
     }
 
-    // Extract formats
     video.Formats, err = ExtractFormats(playerResponse)
     if err != nil {
         return nil, fmt.Errorf("failed to extract formats: %w", err)
@@ -54,15 +52,50 @@ func (c *Client) GetVideo(url string) (*Video, error) {
 
     fmt.Printf("📦 Found %d formats\n", len(video.Formats))
 
-    // Print first few formats for debugging
-    for i, f := range video.Formats[:min(5, len(video.Formats))] {
-        fmt.Printf("   %d. %s %s (itag:%d)\n", i+1, f.QualityLabel, f.MimeType, f.Itag)
-    }
-
     return &video, nil
 }
 
+// Download downloads a specific format to disk
+func (c *Client) Download(video *Video, outputPath string) error {
+    if len(video.Formats) == 0 {
+        return fmt.Errorf("no formats available")
+    }
+
+    format, err := SelectBestFormat(video.Formats)
+    if err != nil {
+        return err
+    }
+
+    fmt.Printf("📹 Selected: %s %s (itag %d)\n", format.QualityLabel, format.MimeType, format.Itag)
+
+    if format.URL == "" {
+        return fmt.Errorf("format has no direct URL (needs deciphering)")
+    }
+
+    fmt.Printf("⬇️  Downloading to: %s\n", outputPath)
+
+    resp, err := c.httpClient.Get(format.URL)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+
+    file, err := os.Create(outputPath)
+    if err != nil {
+        return err
+    }
+    defer file.Close()
+
+    _, err = io.Copy(file, resp.Body)
+    if err != nil {
+        return err
+    }
+
+    return nil
+}
+
 func (c *Client) fetchWatchPage(videoID string) (string, error) {
+    // ... (keep existing fetchWatchPage function)
     url := "https://www.youtube.com/watch?v=" + videoID
 
     resp, err := c.httpClient.Get(url)

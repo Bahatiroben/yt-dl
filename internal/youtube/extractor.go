@@ -153,3 +153,44 @@ func ExtractFormats(playerResponse map[string]interface{}) ([]Format, error) {
 
     return formats, nil
 }
+
+// SelectBestFormat selects the best quality MP4 format with audio
+func SelectBestFormat(formats []Format) (*Format, error) {
+    var best *Format
+
+    for i := range formats {
+        f := &formats[i]
+
+        // Prefer formats that have both video and audio
+        if !f.HasVideo || !f.HasAudio {
+            continue
+        }
+
+        // Prefer MP4
+        if !strings.Contains(f.MimeType, "mp4") {
+            continue
+        }
+
+        if best == nil || f.Bitrate > best.Bitrate {
+            best = f
+        }
+    }
+
+    if best == nil {
+        // Fallback: any format with audio
+        for i := range formats {
+            f := &formats[i]
+            if f.HasAudio && strings.Contains(f.MimeType, "mp4") {
+                if best == nil || f.Bitrate > best.Bitrate {
+                    best = f
+                }
+            }
+        }
+    }
+
+    if best == nil {
+        return nil, errors.New("no suitable format found")
+    }
+
+    return best, nil
+}
