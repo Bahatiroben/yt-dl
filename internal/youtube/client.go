@@ -24,15 +24,25 @@ func (c *Client) GetVideo(url string) (*Video, error) {
 
     fmt.Printf("📼 Video ID: %s\n", videoID)
 
-    // Fetch the watch page
+    // Fetch watch page
     pageHTML, err := c.fetchWatchPage(videoID)
     if err != nil {
         return nil, fmt.Errorf("failed to fetch video page: %w", err)
     }
 
-    fmt.Printf("📄 Successfully fetched watch page (%d bytes)\n", len(pageHTML))
+    fmt.Printf("📄 Fetched watch page (%d bytes)\n", len(pageHTML))
 
-    // Still placeholder response for now
+    // Extract player response JSON
+    playerResponse, err := ExtractPlayerResponse(pageHTML)
+    if err != nil {
+        return nil, fmt.Errorf("failed to extract player response: %w", err)
+    }
+
+	var _ = playerResponse
+
+    fmt.Println("✅ Successfully extracted ytInitialPlayerResponse JSON")
+
+    // Still using placeholder for now
     return &Video{
         ID:     videoID,
         Title:  "Placeholder Title",
@@ -41,7 +51,6 @@ func (c *Client) GetVideo(url string) (*Video, error) {
     }, nil
 }
 
-// fetchWatchPage downloads the YouTube watch page HTML
 func (c *Client) fetchWatchPage(videoID string) (string, error) {
     url := "https://www.youtube.com/watch?v=" + videoID
 

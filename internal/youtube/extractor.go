@@ -1,6 +1,7 @@
 package youtube
 
 import (
+    "encoding/json"
     "errors"
     "regexp"
     "strings"
@@ -34,4 +35,27 @@ func ExtractVideoID(url string) (string, error) {
     }
 
     return "", errors.New("could not extract video ID from URL")
+}
+
+// ExtractPlayerResponse extracts the ytInitialPlayerResponse JSON from page HTML
+func ExtractPlayerResponse(html string) (map[string]any, error) {
+    // Regex to find ytInitialPlayerResponse
+	// TODO: Keep an eye on YouTube's page structure changes, as this regex might need updates in the future
+    re := regexp.MustCompile(`var ytInitialPlayerResponse\s*=\s*(\{.+?\});`)
+    matches := re.FindStringSubmatch(html)
+
+    if len(matches) < 2 {
+        return nil, errors.New("could not find ytInitialPlayerResponse in page")
+    }
+
+    jsonStr := matches[1]
+
+    // Parse JSON
+    var playerResponse map[string]any
+    err := json.Unmarshal([]byte(jsonStr), &playerResponse)
+    if err != nil {
+        return nil, errors.New("failed to parse ytInitialPlayerResponse JSON")
+    }
+
+    return playerResponse, nil
 }
