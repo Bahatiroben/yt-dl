@@ -11,7 +11,7 @@ func main() {
     fmt.Println("🚀 My YouTube Downloader Starting...")
 
     // Hardcoded URL for now (we'll make it configurable later)
-    videoURL := "https://www.youtube.com/watch?v=dQw4w9wgxcq"
+    videoURL := "https://www.youtube.com/watch?v=5XAUYY8kdcg&list=RD5XAUYY8kdcg&start_radio=1"
 
     client := youtube.NewClient()
 
