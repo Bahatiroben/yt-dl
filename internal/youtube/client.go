@@ -38,17 +38,19 @@ func (c *Client) GetVideo(url string) (*Video, error) {
         return nil, fmt.Errorf("failed to extract player response: %w", err)
     }
 
-	var _ = playerResponse
+    fmt.Println("✅ Extracted ytInitialPlayerResponse")
 
-    fmt.Println("✅ Successfully extracted ytInitialPlayerResponse JSON")
+    // Extract metadata
+    video, err := ExtractVideoMetadata(playerResponse)
+    if err != nil {
+        return nil, fmt.Errorf("failed to extract metadata: %w", err)
+    }
 
-    // Still using placeholder for now
-    return &Video{
-        ID:     videoID,
-        Title:  "Placeholder Title",
-        Author: "Placeholder Author",
-        Length: 180,
-    }, nil
+    fmt.Printf("🎥 Title : %s\n", video.Title)
+    fmt.Printf("👤 Author: %s\n", video.Author)
+    fmt.Printf("⏱️  Length: %d seconds\n", video.Length)
+
+    return &video, nil
 }
 
 func (c *Client) fetchWatchPage(videoID string) (string, error) {
