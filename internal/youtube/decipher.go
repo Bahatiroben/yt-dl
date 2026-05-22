@@ -2,7 +2,7 @@ package youtube
 
 import (
     "errors"
-    "fmt"
+    _ "fmt"
     "regexp"
     "strings"
 )

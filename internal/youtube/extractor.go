@@ -154,33 +154,46 @@ func ExtractFormats(playerResponse map[string]interface{}) ([]Format, error) {
     return formats, nil
 }
 
-// SelectBestFormat selects the best quality MP4 format with audio
+// SelectBestFormat selects the best format preferring direct downloadable URLs
 func SelectBestFormat(formats []Format) (*Format, error) {
     var best *Format
 
     for i := range formats {
         f := &formats[i]
 
-        // Prefer formats that have both video and audio
-        if !f.HasVideo || !f.HasAudio {
+        // Skip formats without URL for now (they need deciphering)
+        if f.URL == "" {
             continue
         }
 
-        // Prefer MP4
-        if !strings.Contains(f.MimeType, "mp4") {
-            continue
-        }
-
-        if best == nil || f.Bitrate > best.Bitrate {
-            best = f
+        // Priority 1: MP4 with both video + audio
+        if strings.Contains(f.MimeType, "mp4") && f.HasVideo && f.HasAudio {
+            if best == nil || f.Bitrate > best.Bitrate {
+                best = f
+            }
         }
     }
 
+    // Priority 2: Any MP4 with direct URL
     if best == nil {
-        // Fallback: any format with audio
         for i := range formats {
             f := &formats[i]
-            if f.HasAudio && strings.Contains(f.MimeType, "mp4") {
+            if f.URL == "" {
+                continue
+            }
+            if strings.Contains(f.MimeType, "mp4") {
+                if best == nil || f.Bitrate > best.Bitrate {
+                    best = f
+                }
+            }
+        }
+    }
+
+    // Priority 3: Any format with direct URL (last resort)
+    if best == nil {
+        for i := range formats {
+            f := &formats[i]
+            if f.URL != "" {
                 if best == nil || f.Bitrate > best.Bitrate {
                     best = f
                 }
@@ -189,7 +202,7 @@ func SelectBestFormat(formats []Format) (*Format, error) {
     }
 
     if best == nil {
-        return nil, errors.New("no suitable format found")
+        return nil, errors.New("no downloadable format found (all require deciphering)")
     }
 
     return best, nil
